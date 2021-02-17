@@ -566,6 +566,24 @@ class int_convert:
         return sign * int(string, base)
 
 
+class float_convert:
+    """Convert a string to a float.
+
+    The string may start with a sign.
+    """
+
+    THOUSANDS = r'\d{1,3}(,\d{3})+\.\d+'
+
+    def __init__(self, converter):
+        self.converter = converter
+
+    def __call__(self, string, match):
+        if re.match(self.THOUSANDS, string):
+            string = re.sub(',', '', string)
+        result = self.converter(string)
+        return result
+
+
 class convert_first:
     """Convert the first element of a pair.
     This equivalent to lambda s,m: converter(s). But unlike a lambda function, it can be pickled
@@ -758,7 +776,7 @@ ALLOWED_TYPES = set(list('nbox%fFegwWdDsSl') + ['t' + c for c in 'ieahgcts'])
 
 
 def extract_format(format, extra_types):
-    """Pull apart the format [[fill]align][0][width][.precision][type]"""
+    """Pull apart the format [[fill]align][0][width][grouping_option][.precision][type]"""
     fill = align = None
     if format[0] in '<>=^':
         align = format[0]
@@ -778,6 +796,11 @@ def extract_format(format, extra_types):
         if not format[0].isdigit():
             break
         width += format[0]
+        format = format[1:]
+
+    grouping_option = None
+    if format and format[0] == ',':
+        grouping_option = format[0]
         format = format[1:]
 
     if format.startswith('.'):
@@ -1079,7 +1102,7 @@ class Parser(object):
 
         # figure type conversions, if any
         type = format['type']
-        is_numeric = type and type in 'n%fegdobx'
+        is_numeric = type and type in 'n%fFegdobx'
         if type in self._extra_types:
             type_converter = self._extra_types[type]
             s = getattr(type_converter, 'pattern', r'.+?')
@@ -1109,11 +1132,21 @@ class Parser(object):
             self._group_index += 1
             self._type_conversions[group] = percentage
         elif type == 'f':
-            s = r'\d*\.\d+'
-            self._type_conversions[group] = convert_first(float)
+            if format.get('grouping_option') == ',':
+                s = r'(\d{1,3}(?:,\d{3})*)*\.\d+'
+                self._group_index += 1
+                self._type_conversions[group] = float_convert(float)
+            else:
+                s = r'\d*\.\d+'
+                self._type_conversions[group] = convert_first(float)
         elif type == 'F':
-            s = r'\d*\.\d+'
-            self._type_conversions[group] = convert_first(Decimal)
+            if format.get('grouping_option') == ',':
+                s = r'(\d{1,3}(?:,\d{3})*)*\.\d+'
+                self._group_index += 1
+                self._type_conversions[group] = float_convert(Decimal)
+            else:
+                s = r'\d*\.\d+'
+                self._type_conversions[group] = convert_first(Decimal)
         elif type == 'e':
             s = r'\d*\.\d+[eE][-+]?\d+|nan|NAN|[-+]?inf|[-+]?INF'
             self._type_conversions[group] = convert_first(float)
